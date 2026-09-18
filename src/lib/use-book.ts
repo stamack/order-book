@@ -1,128 +1,175 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import {
-  type Book,
-  type Coin,
-  type Depth,
-  type Precision,
-  depthFrom,
-  parseBook,
-} from "./book";
+import { type Coin, type Precision, parseBook } from "./book";
+import { BookMerger, type MergedBook, type Source } from "./merge-book";
 
+export type Connection = "connecting" | "live" | "stale" | "reconnecting";
 export type FeedState = {
-  book: Book | null;
-  depth: Depth;
-  status: "connecting" | "live" | "stale" | "reconnecting";
-  updates: number;
+  book: MergedBook | null;
+  status: Connection | "degraded";
+  connections: Record<Source, Connection>;
 };
 const initial: FeedState = {
   book: null,
-  depth: [[], []],
   status: "connecting",
-  updates: 0,
+  connections: { fast: "connecting", slow: "connecting" },
 };
 
-/** Separate sockets: WsBook has no fast/nSigFigs field to identify subscriptions. */
-export function useBook(
-  coin: Coin,
-  precision: Precision,
-  fast: boolean,
-): FeedState {
+export function useOrderBook(coin: Coin, precision: Precision): FeedState {
   const [state, setState] = useState<FeedState>(initial);
   useEffect(() => {
+    const merger = new BookMerger(coin);
     let disposed = false;
-    let socket: WebSocket;
-    let retry: ReturnType<typeof setTimeout>;
     let frame = 0;
-    let attempts = 0;
-    let lastReceived = Date.now();
-    let lastPing = 0;
-    let pending: Book | null = null;
-    let published: Book | null = null;
-    let newestTime = 0;
-    let updates = 0;
+    let newestTime = -1;
+    let currentReceivedAt = Date.now();
+    let lastCacheCount = 0;
+    let currentStale = false;
+    const connections: Record<Source, Connection> = {
+      fast: "connecting",
+      slow: "connecting",
+    };
+    const sockets = {} as Record<Source, WebSocket>;
+    const retries: Partial<Record<Source, ReturnType<typeof setTimeout>>> = {};
+    const attempts = { fast: 0, slow: 0 };
+    const receivedAt = { fast: Date.now(), slow: Date.now() };
+    const pingedAt = { fast: 0, slow: 0 };
 
-    function connect() {
+    function publish() {
+      if (disposed || frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        if (disposed) return;
+        const now = Date.now();
+        const book = merger.read(now);
+        const healthy = Object.values(connections).every(
+          (value) => value === "live",
+        );
+        const reconnecting = Object.values(connections).every(
+          (value) => value === "reconnecting",
+        );
+        const status = !book
+          ? reconnecting
+            ? "reconnecting"
+            : "connecting"
+          : now - currentReceivedAt > 10_000
+            ? "stale"
+            : healthy
+              ? "live"
+              : "degraded";
+        lastCacheCount =
+          book?.levels.flat().filter((level) => !level.confirmed).length ?? 0;
+        setState({ book, status, connections: { ...connections } });
+        if (book) merger.published(book);
+      });
+    }
+
+    function connect(source: Source) {
       if (disposed) return;
-      lastReceived = Date.now();
-      socket = new WebSocket("wss://api.hyperliquid.xyz/ws");
+      receivedAt[source] = Date.now();
+      // WsBook doesn't identify fast/slow subscriptions; sockets do.
+      const socket = (sockets[source] = new WebSocket(
+        "wss://api.hyperliquid.xyz/ws",
+      ));
       socket.onopen = () => {
+        if (disposed) return;
         socket.send(
           JSON.stringify({
             method: "subscribe",
             subscription: {
               type: "l2Book",
               coin,
-              fast,
+              fast: source === "fast",
               ...(precision === null ? {} : { nSigFigs: precision }),
             },
           }),
         );
       };
       socket.onmessage = (event) => {
-        if (disposed) return;
-        let book: Book | null;
+        if (disposed || sockets[source] !== socket) return;
         try {
-          book = parseBook(JSON.parse(event.data), coin);
+          const book = parseBook(JSON.parse(event.data), coin);
+          if (
+            !book ||
+            (source === "fast" && book.levels.some((side) => side.length > 5))
+          )
+            return;
+          const now = Date.now();
+          const changed = merger.ingest(source, book, now);
+          receivedAt[source] = now;
+          attempts[source] = 0;
+          const recovered = connections[source] !== "live";
+          connections[source] = "live";
+          if (book.time >= newestTime) {
+            newestTime = book.time;
+            currentReceivedAt = now;
+          }
+          if (changed || recovered) publish();
         } catch {
-          return;
+          /* Malformed messages never replace valid data. */
         }
-        if (!book || book.time < newestTime) return;
-        newestTime = book.time;
-        lastReceived = Date.now();
-        attempts = 0;
-        updates++;
-        pending = book;
-        // Coalesce bursts to the latest complete snapshot at the next paint.
-        if (!frame)
-          frame = requestAnimationFrame(() => {
-            frame = 0;
-            if (disposed || !pending) return;
-            setState({
-              book: pending,
-              depth: depthFrom(pending, published),
-              status: "live",
-              updates,
-            });
-            published = pending;
-            pending = null;
-          });
       };
       socket.onerror = () => socket.close();
       socket.onclose = () => {
         if (disposed) return;
-        cancelAnimationFrame(frame);
-        frame = 0;
-        pending = null;
-        published = null; // Reconnect snapshots should not flash every level.
-        setState((current) => ({ ...current, status: "reconnecting" }));
-        retry = setTimeout(connect, Math.min(1000 * 2 ** attempts++, 15_000));
+        connections[source] = "reconnecting";
+        publish();
+        retries[source] = setTimeout(
+          () => connect(source),
+          Math.min(1000 * 2 ** attempts[source]++, 15_000),
+        );
       };
     }
-
-    connect();
+    connect("fast");
+    connect("slow");
     const heartbeat = setInterval(() => {
       const now = Date.now();
-      if (socket.readyState === WebSocket.OPEN && now - lastPing >= 25_000) {
-        socket.send(JSON.stringify({ method: "ping" }));
-        lastPing = now;
+      let changed = false;
+      for (const source of ["fast", "slow"] as const) {
+        const socket = sockets[source];
+        if (
+          socket.readyState === WebSocket.OPEN &&
+          now - pingedAt[source] >= 25_000
+        ) {
+          socket.send(JSON.stringify({ method: "ping" }));
+          pingedAt[source] = now;
+        }
+        if (
+          now - receivedAt[source] > 10_000 &&
+          connections[source] === "live"
+        ) {
+          connections[source] = "stale";
+          changed = true;
+        }
+        if (
+          now - receivedAt[source] > 20_000 &&
+          socket.readyState < WebSocket.CLOSING
+        )
+          socket.close();
       }
-      if (now - lastReceived > 10_000)
-        setState((current) =>
-          current.status === "live" ? { ...current, status: "stale" } : current,
-        );
-      if (now - lastReceived > 20_000 && socket.readyState < WebSocket.CLOSING)
-        socket.close();
-    }, 1000);
+      // Expire historical tails even when both feeds go quiet.
+      const cached = lastCacheCount
+        ? (merger
+            .read(now)
+            ?.levels.flat()
+            .filter((level) => !level.confirmed).length ?? 0)
+        : 0;
+      const stale = newestTime >= 0 && now - currentReceivedAt > 10_000;
+      if (changed || stale !== currentStale || cached !== lastCacheCount)
+        publish();
+      currentStale = stale;
+    }, 250);
     return () => {
       disposed = true;
       clearInterval(heartbeat);
-      clearTimeout(retry);
       cancelAnimationFrame(frame);
-      socket.onclose = null;
-      socket.close();
+      for (const source of ["fast", "slow"] as const) {
+        clearTimeout(retries[source]);
+        sockets[source].onclose = null;
+        sockets[source].close();
+      }
     };
-  }, [coin, precision, fast]);
+  }, [coin, precision]);
   return state;
 }

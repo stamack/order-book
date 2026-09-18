@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { depthFrom, metrics, parseBook, type Book } from "../src/lib/book";
+import { displaySize, metrics, parseBook, type Book } from "../src/lib/book";
 
 const book: Book = {
   coin: "BTC",
@@ -57,31 +57,9 @@ describe("snapshot validation", () => {
 });
 
 describe("trader metrics", () => {
-  it("sums cumulative base size from the inside out on both sides", () => {
-    const depth = depthFrom(book, null);
-    expect(depth[0].map((l) => l.total)).toEqual([2, 5]);
-    expect(depth[1].map((l) => l.total)).toEqual([4, 9]);
-    expect(depth.flat().some((l) => l.entered)).toBe(false);
-  });
-  it("flags only new prices, not moving rows, formatting changes or size changes", () => {
-    const next: Book = {
-      ...book,
-      levels: [
-        [
-          { px: "100.5", sz: "1", n: 1 },
-          { px: "100.0", sz: "8", n: 2 },
-        ],
-        book.levels[1],
-      ],
-    };
-    expect(depthFrom(next, book)[0].map((l) => l.entered)).toEqual([
-      true,
-      false,
-    ]);
-    expect(depthFrom(book, next)[0].map((l) => l.entered)).toEqual([
-      false,
-      true,
-    ]);
+  it("preserves the smallest BTC size and compacts large aggregates", () => {
+    expect(displaySize(0.00001)).toBe("0.00001");
+    expect(displaySize(125000)).toBe("125K");
   });
   it("computes midpoint, spread and basis points; handles one-sided books", () => {
     expect(metrics(book)).toEqual({

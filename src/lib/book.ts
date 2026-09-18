@@ -2,8 +2,6 @@ export type Coin = "BTC" | "ETH";
 export type Precision = 2 | 3 | 4 | 5 | null;
 export type Level = { px: string; sz: string; n: number };
 export type Book = { coin: Coin; time: number; levels: [Level[], Level[]] };
-export type DepthLevel = Level & { total: number; entered: boolean };
-export type Depth = [DepthLevel[], DepthLevel[]];
 
 /** Reject malformed/crossed snapshots before replacing the last good book. */
 export function parseBook(message: unknown, coin: Coin): Book | null {
@@ -19,7 +17,9 @@ export function parseBook(message: unknown, coin: Coin): Book | null {
   if (
     !book ||
     book.coin !== coin ||
-    !Number.isFinite(book.time) ||
+    !Number.isSafeInteger(book.time) ||
+    book.time < 0 ||
+    book.time > 8_640_000_000_000_000 ||
     !Array.isArray(book.levels) ||
     book.levels.length !== 2
   )
@@ -53,18 +53,6 @@ export function parseBook(message: unknown, coin: Coin): Book | null {
   const [bid, ask] = book.levels.map((levels) => levels[0]);
   if (bid && ask && +bid.px >= +ask.px) return null;
   return book;
-}
-
-export function depthFrom(book: Book, previous: Book | null): Depth {
-  return book.levels.map((levels, side) => {
-    const oldPrices = new Set(previous?.levels[side].map((level) => +level.px));
-    let total = 0;
-    return levels.map((level) => ({
-      ...level,
-      total: (total += +level.sz),
-      entered: previous !== null && !oldPrices.has(+level.px),
-    }));
-  }) as Depth;
 }
 
 export function metrics(book: Book | null) {
