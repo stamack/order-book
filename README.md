@@ -1,6 +1,6 @@
 # Depth
 
-One live order book for BTC and ETH, built with Next.js, React, and TypeScript. Asks sit above the midpoint; bids sit below. A compact 360 × 629 px desktop widget with 18 px rows, mint/rose depth bars, and brief flashes for newly entering prices.
+One live order book for BTC and ETH, built with Next.js, React, and TypeScript. Asks sit above the midpoint; bids sit below. A compact 360 × 613 px desktop widget with 18 px rows, mint/rose depth bars, and brief flashes for newly entering prices.
 
 [Live demo](https://stamack.github.io/order-book/) · [Source](https://github.com/stamack/order-book)
 
@@ -24,12 +24,12 @@ These feeds **cannot reconstruct an exact, current twenty-level book between ful
 1. Order data by exchange timestamp. The newest full snapshot supplies confirmed depth; a newer fast snapshot replaces the inside five levels unchanged. Old messages cannot roll the best prices backward. Equal-time snapshots share full depth only when their first five levels agree.
 2. Preserve the slow snapshot’s shape by **distance from its best price**, carrying sizes at the corresponding depth rank. Translate that price-distance profile around the newest fast best price on each side.
 3. If the fast five-level range has widened, shift the projected tail farther outward so it cannot overlap the real five levels. Preserve the gaps within the slow profile. Prices remain positive, sorted, unique, and outside the confirmed spread.
-4. Projected prices, sizes, and cumulative totals are marked **≈**, with subdued striped depth bars. These are estimates, not exchange orders. The model assumes outer sizes and price spacing remain similar until the next full snapshot; it does not extrapolate a volume multiplier from the fast feed.
+4. Projected prices, sizes, and cumulative totals use subdued striped depth bars and are identified in the hover summary. These are estimates, not exchange orders. The model assumes outer sizes and price spacing remain similar until the next full snapshot; it does not extrapolate a volume multiplier from the fast feed.
 5. A newer full snapshot replaces projections with actual levels. An exhausted fast side (fewer than five levels) never receives a fabricated tail. A missing or more-than-ten-second-old slow profile cannot support projections, so unused slots remain placeholders in those cases.
 
 For example, if the slow sixth bid is $5 below its best bid, an unchanged-width fast core moving up $3 moves the projected sixth bid up $3 too. Its size comes from the slow sixth level. It remains outside the fifth fast bid and is labeled estimated until confirmed.
 
-Midpoint, spread, and top-five balance use only confirmed data. Cumulative totals and bars can include projections and are marked accordingly. Both sides share one bar scale. Twelve levels per side are displayed, with fixed placeholders for unavailable rows.
+Midpoint, spread, and top-five balance use only confirmed data. Cumulative totals and bars can include projections and are identified in the hover summary. Both sides share one bar scale. Twelve levels per side are displayed, with fixed placeholders for unavailable rows.
 
 ## Hover summaries
 
@@ -37,12 +37,16 @@ Hover or focus a level to highlight the inclusive range from the best quote thro
 
 The merge engine is in `src/lib/merge-book.ts`; transport and coalesced publication are in `src/lib/use-book.ts`.
 
+## Live trades
+
+The Trades tab streams BTC/ETH executions, with mint buy prices and rose sell prices. Each row links to its transaction on the Hyperliquid explorer. Distinct fills are deduplicated by coin, timestamp, and trade ID, sorted by time, and bounded to 27 rows. Only the active tab subscribes. Hover Live for the last update timestamp; sizes use full numbers with thousands separators.
+
 ## Interaction and performance
 
 - BTC / ETH selector; significant-figure options 2–5 and full precision.
 - One vertical table, with asks descending toward the spread and bids descending away from it, following the layouts of Hyperliquid and Binance.
 - Fixed panel, row, and column geometry at desktop and mobile sizes. Precision changes, sparse books, and reconnections do not resize the widget.
-- Confirmed rows are keyed by price; projected rows are keyed by depth rank. New confirmed levels flash; size changes and midpoint movement receive restrained color feedback. Reduced-motion preferences disable animation.
+- Confirmed rows are keyed by price; projected rows are keyed by depth rank. New confirmed levels flash at the row background only; numeric text never flashes. Reduced-motion preferences disable animation.
 - Every message updates the snapshot model, but React publishes at most once per animation frame. Memoized rows receive primitive props.
 - Heartbeats, stale indicators, capped exponential reconnection backoff, and independent socket recovery. Switching symbol/precision disposes both subscriptions and atomically clears the old book.
 

@@ -78,13 +78,7 @@ const sizeFormat = new Intl.NumberFormat("en-US", {
   minimumFractionDigits: 4,
   maximumFractionDigits: 5,
 });
-const compactFormat = new Intl.NumberFormat("en-US", {
-  notation: "compact",
-  maximumFractionDigits: 2,
-});
 export const price = (value: number | undefined) =>
   value === undefined ? "—" : priceFormat.format(value);
 export const size = (value: number) => sizeFormat.format(value);
-export const compact = (value: number) => compactFormat.format(value);
-export const displaySize = (value: number) =>
-  value >= 1000 ? compact(value) : size(value);
+export const displaySize = size;

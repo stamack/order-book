@@ -57,9 +57,9 @@ describe("snapshot validation", () => {
 });
 
 describe("trader metrics", () => {
-  it("preserves the smallest BTC size and compacts large aggregates", () => {
+  it("preserves the smallest BTC size and shows full large aggregates", () => {
     expect(displaySize(0.00001)).toBe("0.00001");
-    expect(displaySize(125000)).toBe("125K");
+    expect(displaySize(125000)).toBe("125,000.0000");
   });
   it("computes midpoint, spread and basis points; handles one-sided books", () => {
     expect(metrics(book)).toEqual({

@@ -16,16 +16,52 @@ import {
   type DepthSelection,
 } from "./depth-summary";
 
+import { Trades } from "./trades";
+
 const VISIBLE_LEVELS = 12;
 export function Terminal() {
+  const [tab, setTab] = useState<"book" | "trades">("book");
   const [coin, setCoin] = useState<Coin>("BTC");
   const [precision, setPrecision] = useState<Precision>(5);
   return (
     <main>
       <section className="workspace" aria-label="Live order book">
-        <header className="widget-heading">
-          <h1>Order book</h1>
-        </header>
+        <div
+          className="widget-heading"
+          role="tablist"
+          aria-label="Market data"
+          onKeyDown={(event) => {
+            const next =
+              event.key === "Home"
+                ? "book"
+                : event.key === "End"
+                  ? "trades"
+                  : event.key === "ArrowLeft" || event.key === "ArrowRight"
+                    ? tab === "book"
+                      ? "trades"
+                      : "book"
+                    : null;
+            if (next) {
+              event.preventDefault();
+              setTab(next);
+              document.getElementById(`${next}-tab`)?.focus();
+            }
+          }}
+        >
+          {(["book", "trades"] as const).map((value) => (
+            <button
+              key={value}
+              id={`${value}-tab`}
+              role="tab"
+              aria-selected={tab === value}
+              aria-controls="market-panel"
+              tabIndex={tab === value ? 0 : -1}
+              onClick={() => setTab(value)}
+            >
+              {value === "book" ? "Order book" : "Trades"}
+            </button>
+          ))}
+        </div>
         <div className="book-toolbar">
           <label className="sr-only" htmlFor="market">
             Market
@@ -43,6 +79,7 @@ export function Terminal() {
           </label>
           <select
             id="precision"
+            hidden={tab !== "book"}
             value={precision ?? "full"}
             onChange={(event) =>
               setPrecision(
@@ -60,11 +97,22 @@ export function Terminal() {
             ))}
           </select>
         </div>
-        <OrderBook
-          key={`${coin}:${precision}`}
-          coin={coin}
-          precision={precision}
-        />
+        <div
+          id="market-panel"
+          role="tabpanel"
+          aria-labelledby={`${tab}-tab`}
+          className="data-panel"
+        >
+          {tab === "book" ? (
+            <OrderBook
+              key={`${coin}:${precision}`}
+              coin={coin}
+              precision={precision}
+            />
+          ) : (
+            <Trades key={coin} coin={coin} />
+          )}
+        </div>
       </section>
     </main>
   );
@@ -82,7 +130,7 @@ function Status({ feed }: { feed: FeedState }) {
     <span
       className={`feed-status ${feed.status}`}
       role="status"
-      title={`Fast feed: ${feed.connections.fast}. Full depth: ${feed.connections.slow}.`}
+      title={`${feed.book ? `Last updated at ${new Date(feed.book.time).toISOString()}. ` : "Waiting for first update. "}Fast feed: ${feed.connections.fast}. Full depth: ${feed.connections.slow}.`}
     >
       <i />
       {labels[feed.status]}
@@ -114,7 +162,6 @@ const Row = memo(function Row({
   side: "bid" | "ask";
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const previousSize = useRef(sz);
   useEffect(() => {
     if (
       entered &&
@@ -129,24 +176,6 @@ const Row = memo(function Row({
       );
     }
   }, [entered, side]);
-  useEffect(() => {
-    if (
-      confirmed &&
-      previousSize.current !== sz &&
-      !window.matchMedia("(prefers-reduced-motion: reduce)").matches
-    ) {
-      ref.current
-        ?.querySelector(".level-size")
-        ?.animate(
-          [
-            { color: +sz > +previousSize.current ? "#7becce" : "#ff9baa" },
-            { color: "#cfdddf" },
-          ],
-          { duration: 400 },
-        );
-    }
-    previousSize.current = sz;
-  }, [sz, confirmed]);
   return (
     <div
       ref={ref}
@@ -166,21 +195,12 @@ const Row = memo(function Row({
         aria-hidden="true"
       />
       <span role="cell" className="level-price">
-        <span className="estimate-mark" aria-hidden="true">
-          {confirmed ? "" : "≈"}
-        </span>
         {price(+px)}
       </span>
       <span role="cell" className="level-size">
-        <span className="estimate-mark" aria-hidden="true">
-          {confirmed ? "" : "≈"}
-        </span>
         {displaySize(+sz)}
       </span>
       <span role="cell" className="level-total">
-        <span className="estimate-mark" aria-hidden="true">
-          {confirmed ? "" : "≈"}
-        </span>
         {displaySize(total)}
       </span>
     </div>
@@ -247,33 +267,6 @@ function Side({
         ),
       )}
     </div>
-  );
-}
-
-function MidPrice({ value }: { value: number | undefined }) {
-  const ref = useRef<HTMLSpanElement>(null);
-  const previous = useRef(value);
-  useEffect(() => {
-    if (
-      value !== undefined &&
-      previous.current !== undefined &&
-      value !== previous.current &&
-      !window.matchMedia("(prefers-reduced-motion: reduce)").matches
-    ) {
-      ref.current?.animate(
-        [
-          { color: value > previous.current ? "#78dfc0" : "#f294a4" },
-          { color: "#edf4f3" },
-        ],
-        { duration: 650 },
-      );
-    }
-    previous.current = value;
-  }, [value]);
-  return (
-    <span ref={ref} className="mid-value">
-      {price(value)}
-    </span>
   );
 }
 
@@ -344,11 +337,8 @@ function OrderBook({ coin, precision }: { coin: Coin; precision: Precision }) {
           selection={activeSelection}
         />
         <div className="spread" role="row">
-          <div role="cell" className="mid-price">
-            <MidPrice value={values?.mid} />
-            <span>
-              Mid price <small>USD</small>
-            </span>
+          <div role="cell" className="mid-price" title="Mid price (USD)">
+            <span className="mid-value">{price(values?.mid)}</span>
           </div>
           <div role="cell" className="spread-value">
             <span>
@@ -378,12 +368,14 @@ function OrderBook({ coin, precision }: { coin: Coin; precision: Precision }) {
           stale={feed.status === "stale"}
         />
       )}
-      <div className="imbalance">
+      <div
+        className="imbalance"
+        title="Balance of the five confirmed levels on each side"
+      >
         <div className="imbalance-labels">
           <span className="bid-text">
             B <strong>{feed.book ? `${balance.toFixed(1)}%` : "—"}</strong>
           </span>
-          <span>Top 5 balance</span>
           <span className="ask-text">
             <strong>
               {feed.book ? `${(100 - balance).toFixed(1)}%` : "—"}
@@ -397,9 +389,6 @@ function OrderBook({ coin, precision }: { coin: Coin; precision: Precision }) {
       </div>
       <footer className="feed-footer">
         <Status feed={feed} />
-        <span title="Outer levels are projected from the last full snapshot. Approximate prices, sizes and totals are marked ≈.">
-          ≈ Estimated depth
-        </span>
       </footer>
     </div>
   );

@@ -107,24 +107,24 @@ test("fast core wins; delayed slow depth supplies labeled estimates and cumulati
   expect(
     await page.locator(".estimated .level-total").allTextContents(),
   ).toEqual([
-    "≈102.0000",
-    "≈88.0000",
-    "≈75.0000",
-    "≈63.0000",
-    "≈52.0000",
-    "≈42.0000",
-    "≈33.0000",
-    "≈27.0000",
-    "≈35.0000",
-    "≈44.0000",
-    "≈54.0000",
-    "≈65.0000",
-    "≈77.0000",
-    "≈90.0000",
+    "102.0000",
+    "88.0000",
+    "75.0000",
+    "63.0000",
+    "52.0000",
+    "42.0000",
+    "33.0000",
+    "27.0000",
+    "35.0000",
+    "44.0000",
+    "54.0000",
+    "65.0000",
+    "77.0000",
+    "90.0000",
   ]);
   expect(
     (await page.locator(".estimated .level-size").allTextContents()).every(
-      (text) => text.includes("≈"),
+      (text) => !text.includes("≈"),
     ),
   ).toBe(true);
   slow.ws.send(snapshot(slow.sub, 130, 2));
@@ -259,7 +259,7 @@ test("hover summarizes the inclusive sweep on both sides without resizing the bo
     await expect(page.locator(`.side-rows.${side} .in-sweep`)).toHaveCount(3);
     expect(await page.locator(".workspace").boundingBox()).toEqual(bounds);
   }
-  await page.locator("h1").hover();
+  await page.getByRole("tab", { name: "Order book" }).hover();
   await expect(page.getByRole("tooltip")).toHaveCount(0);
 });
 
@@ -275,9 +275,7 @@ test("hover remains at the chosen depth rank and updates estimates with new fast
   await row.hover();
   const tooltip = page.getByRole("tooltip");
   await expect(tooltip).toContainText("Includes estimated depth");
-  await expect(tooltip.locator('[data-summary="size"]')).toHaveText(
-    "≈ 44.0000",
-  );
+  await expect(tooltip.locator('[data-summary="size"]')).toHaveText("44.0000");
   const before = await tooltip.locator('[data-summary="notional"]').innerText();
   fast.ws.send(snapshot(fast.sub, 120, 7));
   await expect(tooltip.locator('[data-summary="notional"]')).not.toHaveText(

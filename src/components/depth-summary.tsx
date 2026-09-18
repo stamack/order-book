@@ -104,7 +104,6 @@ export function DepthSummary({
 }) {
   const summary = summarizeDepth(levels, selection.index);
   if (!summary) return null;
-  const prefix = summary.estimated ? "≈ " : "";
   return createPortal(
     <div
       id="depth-summary"
@@ -124,14 +123,13 @@ export function DepthSummary({
         {stale
           ? "Stale data"
           : summary.estimated
-            ? "≈ Includes estimated depth"
+            ? "Includes estimated depth"
             : "Confirmed depth"}
       </div>
       <dl>
         <div>
           <dt>Distance from mid</dt>
           <dd>
-            {prefix}
             {mid === undefined
               ? "—"
               : `${((Math.abs(summary.price - mid) / mid) * 100).toFixed(4)}%`}
@@ -140,23 +138,16 @@ export function DepthSummary({
         <div>
           <dt>Average price</dt>
           <dd data-summary="average">
-            {prefix}
             {price(summary.average)} <small>USD</small>
           </dd>
         </div>
         <div>
           <dt>Total ({coin})</dt>
-          <dd data-summary="size">
-            {prefix}
-            {size(summary.size)}
-          </dd>
+          <dd data-summary="size">{size(summary.size)}</dd>
         </div>
         <div>
           <dt>Total (USD)</dt>
-          <dd data-summary="notional">
-            {prefix}
-            {price(summary.notional)}
-          </dd>
+          <dd data-summary="notional">{price(summary.notional)}</dd>
         </div>
       </dl>
       <div className="summary-note">
