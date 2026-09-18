@@ -17,131 +17,56 @@ import {
 } from "./depth-summary";
 
 const VISIBLE_LEVELS = 12;
-const DOCS =
-  "https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/websocket/subscriptions";
-
-function Mark() {
-  return (
-    <svg
-      width="25"
-      height="25"
-      viewBox="0 0 27 25"
-      fill="none"
-      aria-hidden="true"
-    >
-      <path d="M2 4h8v17H2zM13 9h5v12h-5zM21 14h4v7h-4z" fill="currentColor" />
-    </svg>
-  );
-}
-
 export function Terminal() {
   const [coin, setCoin] = useState<Coin>("BTC");
   const [precision, setPrecision] = useState<Precision>(5);
   return (
-    <>
-      <header className="site-header">
-        <a className="brand" href="./" aria-label="Depth home">
-          <Mark />
-          depth<span>.</span>
-        </a>
-        <span className="header-caption">THE MARKET, IN FOCUS.</span>
-        <a
-          className="source-link"
-          href={`https://app.hyperliquid.xyz/trade/${coin}`}
-          target="_blank"
-          rel="noreferrer"
-        >
-          <i />
-          Hyperliquid <span aria-hidden="true">↗</span>
-        </a>
-      </header>
-      <main>
-        <div className="page-intro">
-          <span className="eyebrow">LESS NOISE. MORE SIGNAL.</span>
-          <h1>Liquidity, at a glance.</h1>
-          <p>One book. Every move.</p>
+    <main>
+      <section className="workspace" aria-label="Live order book">
+        <header className="widget-heading">
+          <h1>Order book</h1>
+        </header>
+        <div className="book-toolbar">
+          <label className="sr-only" htmlFor="market">
+            Market
+          </label>
+          <select
+            id="market"
+            value={coin}
+            onChange={(event) => setCoin(event.target.value as Coin)}
+          >
+            <option value="BTC">BTC / USD</option>
+            <option value="ETH">ETH / USD</option>
+          </select>
+          <label className="sr-only" htmlFor="precision">
+            Price precision
+          </label>
+          <select
+            id="precision"
+            value={precision ?? "full"}
+            onChange={(event) =>
+              setPrecision(
+                event.target.value === "full"
+                  ? null
+                  : (+event.target.value as Precision),
+              )
+            }
+          >
+            <option value="full">Full precision</option>
+            {[5, 4, 3, 2].map((n) => (
+              <option key={n} value={n}>
+                {n} sig. figs
+              </option>
+            ))}
+          </select>
         </div>
-        <section className="workspace" aria-label="Live order book">
-          <div className="market-toolbar">
-            <div className="market-picker">
-              <span
-                className={`coin-icon ${coin.toLowerCase()}`}
-                aria-hidden="true"
-              >
-                {coin === "BTC" ? "₿" : "Ξ"}
-              </span>
-              <div>
-                <label className="sr-only" htmlFor="market">
-                  Market
-                </label>
-                <select
-                  id="market"
-                  value={coin}
-                  onChange={(event) => setCoin(event.target.value as Coin)}
-                >
-                  <option value="BTC">BTC / USD</option>
-                  <option value="ETH">ETH / USD</option>
-                </select>
-                <span className="market-subtitle">
-                  {coin === "BTC" ? "Bitcoin" : "Ethereum"} perpetual
-                </span>
-              </div>
-            </div>
-            <span className="perp-tag">PERPETUAL</span>
-          </div>
-          <div className="book-toolbar">
-            <h2>
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 14 14"
-                aria-hidden="true"
-              >
-                <path
-                  d="M1 1h12v2H1zm3 4h9v2H4zm3 4h6v2H7z"
-                  fill="currentColor"
-                />
-              </svg>
-              Order book
-            </h2>
-            <div className="precision-control">
-              <label htmlFor="precision">Precision</label>
-              <select
-                id="precision"
-                aria-label="Price precision"
-                value={precision ?? "full"}
-                onChange={(event) =>
-                  setPrecision(
-                    event.target.value === "full"
-                      ? null
-                      : (+event.target.value as Precision),
-                  )
-                }
-              >
-                <option value="full">Full</option>
-                {[5, 4, 3, 2].map((n) => (
-                  <option key={n} value={n}>
-                    {n} sig. figs
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-          {/* An atomic reset prevents a previous market or grouping leaking through. */}
-          <OrderBook
-            key={`${coin}:${precision}`}
-            coin={coin}
-            precision={precision}
-          />
-        </section>
-        <footer className="page-footer">
-          <span>Built for the moments between trades.</span>
-          <a href={DOCS} target="_blank" rel="noreferrer">
-            Powered by Hyperliquid <span aria-hidden="true">↗</span>
-          </a>
-        </footer>
-      </main>
-    </>
+        <OrderBook
+          key={`${coin}:${precision}`}
+          coin={coin}
+          precision={precision}
+        />
+      </section>
+    </main>
   );
 }
 
@@ -378,10 +303,6 @@ function OrderBook({ coin, precision }: { coin: Coin; precision: Precision }) {
     bidSize + askSize ? (bidSize / (bidSize + askSize)) * 100 : 50;
   return (
     <div className={`order-book ${feed.status === "stale" ? "is-stale" : ""}`}>
-      <div className="book-info">
-        <span className="level-count">{VISIBLE_LEVELS} levels per side</span>
-        <Status feed={feed} />
-      </div>
       <div
         className="book-table"
         role="table"
@@ -416,12 +337,6 @@ function OrderBook({ coin, precision }: { coin: Coin; precision: Precision }) {
             Total <small>{coin}</small>
           </span>
         </div>
-        <div className="side-label ask-text" aria-hidden="true">
-          <span>
-            <i /> ASKS
-          </span>
-          <span>Sell orders</span>
-        </div>
         <Side
           levels={asks}
           side="ask"
@@ -446,12 +361,6 @@ function OrderBook({ coin, precision }: { coin: Coin; precision: Precision }) {
           <span role="cell" className="sr-only">
             Midpoint and spread use the newest confirmed snapshot.
           </span>
-        </div>
-        <div className="side-label bid-text" aria-hidden="true">
-          <span>
-            <i /> BIDS
-          </span>
-          <span>Buy orders</span>
         </div>
         <Side
           levels={bids}
@@ -486,31 +395,12 @@ function OrderBook({ coin, precision }: { coin: Coin; precision: Precision }) {
           <div style={{ width: `${balance}%` }} />
         </div>
       </div>
-      <div className="book-legend">
-        <span>
-          <i className="flash-key" />
-          New level
+      <footer className="feed-footer">
+        <Status feed={feed} />
+        <span title="Outer levels are projected from the last full snapshot. Approximate prices, sizes and totals are marked ≈.">
+          ≈ Estimated depth
         </span>
-        <span title="Outer prices follow the last full snapshot’s distance from the best price, using its sizes. Approximate prices and totals are marked ≈. Projections stop when full depth is more than ten seconds old.">
-          ≈ Estimated outer depth
-        </span>
-      </div>
-      <div className="feed-footer">
-        <span>
-          <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
-            <path d="m9 1-6 8h4l-1 6 7-9H9z" fill="currentColor" />
-          </svg>
-          Fast updates. Full depth.
-        </span>
-        <span
-          className="snapshot-time"
-          title="Exchange time of the newest snapshot"
-        >
-          {feed.book
-            ? `${new Date(feed.book.time).toISOString().slice(11, 19)} UTC`
-            : "Waiting for feed"}
-        </span>
-      </div>
+      </footer>
     </div>
   );
 }

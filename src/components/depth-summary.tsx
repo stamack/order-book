@@ -29,8 +29,8 @@ export function useDepthHover() {
       const index = Number(row.dataset.depthIndex);
       const side = row.dataset.side as DepthSelection["side"];
       const rect = row.getBoundingClientRect();
-      const width = Math.min(268, window.innerWidth - 24);
-      const height = 225;
+      const width = Math.min(252, window.innerWidth - 24);
+      const height = 170;
       const left =
         rect.left >= width + 20
           ? rect.left - width - 12

@@ -1,6 +1,6 @@
 # Depth
 
-One live order book for BTC and ETH, built with Next.js, React, and TypeScript. Asks sit above the midpoint; bids sit below. Fixed rows, mint/rose depth bars, and brief flashes for newly entering prices.
+One live order book for BTC and ETH, built with Next.js, React, and TypeScript. Asks sit above the midpoint; bids sit below. A compact 360 × 629 px desktop widget with 18 px rows, mint/rose depth bars, and brief flashes for newly entering prices.
 
 [Live demo](https://stamack.github.io/order-book/) · [Source](https://github.com/stamack/order-book)
 
