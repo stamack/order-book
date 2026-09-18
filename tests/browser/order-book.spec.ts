@@ -163,7 +163,10 @@ test("new prices flash; retained prices keep their DOM nodes; stale packets cann
     await page
       .locator(".book-row")
       .evaluateAll((rows) =>
-        rows.reduce((n, row) => n + row.getAnimations().length, 0),
+        rows.reduce(
+          (n, row) => n + row.getAnimations({ subtree: true }).length,
+          0,
+        ),
       ),
   ).toBe(0);
   const retained = page.locator('.side-rows.bid [data-price="79999"]');
@@ -173,7 +176,9 @@ test("new prices flash; retained prices keep their DOM nodes; stale packets cann
   const entered = page.locator('.side-rows.bid [data-price="80000"]');
   await expect(entered).toHaveCount(1);
   expect(
-    await entered.evaluate((el) => el.getAnimations().length),
+    await entered.evaluate(
+      (el) => el.querySelector(".row-flash")!.getAnimations().length,
+    ),
   ).toBeGreaterThan(0);
   await expect(retained).toHaveAttribute("data-retained", "yes");
   fast.ws.send(snapshot(fast.sub, 105, -20));
@@ -230,7 +235,10 @@ test("reduced motion disables level flashes", async ({ page }) => {
     await page
       .locator(".book-row")
       .evaluateAll((rows) =>
-        rows.reduce((n, row) => n + row.getAnimations().length, 0),
+        rows.reduce(
+          (n, row) => n + row.getAnimations({ subtree: true }).length,
+          0,
+        ),
       ),
   ).toBe(0);
 });

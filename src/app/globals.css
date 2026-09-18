@@ -115,6 +115,7 @@ main {
   height: 18px;
   position: relative;
   isolation: isolate;
+  overflow: hidden;
   font: 11px/1 var(--mono);
   font-variant-numeric: tabular-nums;
   color: #cfdddf;
@@ -134,11 +135,26 @@ main {
 .depth-bar {
   position: absolute;
   inset: 0;
-  z-index: -1;
+  z-index: 0;
   background: #2e8c6936;
   transform-origin: right;
   transition: transform 180ms ease-out;
   pointer-events: none;
+}
+.row-flash {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: #294a40;
+  opacity: 0;
+  pointer-events: none;
+}
+.ask .row-flash {
+  background: #50343d;
+}
+.book-row > [role="cell"] {
+  position: relative;
+  z-index: 2;
 }
 .ask .depth-bar {
   background: #b34e6230;

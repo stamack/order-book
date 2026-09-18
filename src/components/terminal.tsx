@@ -161,24 +161,22 @@ const Row = memo(function Row({
   width: number;
   side: "bid" | "ask";
 }) {
-  const ref = useRef<HTMLDivElement>(null);
+  const flashRef = useRef<HTMLSpanElement>(null);
   useEffect(() => {
     if (
       entered &&
       !window.matchMedia("(prefers-reduced-motion: reduce)").matches
     ) {
-      ref.current?.animate(
-        [
-          { backgroundColor: side === "bid" ? "#56edbe50" : "#ff829950" },
-          { backgroundColor: "transparent" },
-        ],
-        { duration: 650, easing: "ease-out" },
-      );
+      const flash = flashRef.current;
+      flash?.getAnimations().forEach((animation) => animation.cancel());
+      flash?.animate([{ opacity: 1 }, { opacity: 0 }], {
+        duration: 650,
+        easing: "ease-out",
+      });
     }
   }, [entered, side]);
   return (
     <div
-      ref={ref}
       role="row"
       className={`book-row ${side} ${confirmed ? "confirmed" : "estimated"} ${highlighted ? "in-sweep" : ""} ${selected ? "selected-level" : ""}`}
       data-price={px}
@@ -194,6 +192,7 @@ const Row = memo(function Row({
         style={{ transform: `scaleX(${width})` }}
         aria-hidden="true"
       />
+      <span ref={flashRef} className="row-flash" aria-hidden="true" />
       <span role="cell" className="level-price">
         {price(+px)}
       </span>
