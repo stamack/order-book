@@ -91,7 +91,7 @@ test("one vertical book: asks above the spread, bids below; switches clear both 
   );
 });
 
-test("fast core wins; delayed slow depth is marked historical and excluded from totals", async ({
+test("fast core wins; delayed slow depth supplies labeled estimates and cumulative totals", async ({
   page,
 }) => {
   const connections = await mockFeeds(page);
@@ -102,24 +102,39 @@ test("fast core wins; delayed slow depth is marked historical and excluded from 
   fast.ws.send(snapshot(fast.sub, 120, 1));
   await expect(page.locator(".mid-value")).toHaveText("80,001.00");
   slow.ws.send(snapshot(slow.sub, 110, 0));
-  await expect(page.locator(".cached")).toHaveCount(14);
+  await expect(page.locator(".estimated")).toHaveCount(14);
   await expect(page.locator(".mid-value")).toHaveText("80,001.00");
-  expect(await page.locator(".cached .level-total").allTextContents()).toEqual(
-    Array(14).fill("—"),
-  );
   expect(
-    (await page.locator(".cached .level-size").allTextContents()).every(
+    await page.locator(".estimated .level-total").allTextContents(),
+  ).toEqual([
+    "≈102.0000",
+    "≈88.0000",
+    "≈75.0000",
+    "≈63.0000",
+    "≈52.0000",
+    "≈42.0000",
+    "≈33.0000",
+    "≈27.0000",
+    "≈35.0000",
+    "≈44.0000",
+    "≈54.0000",
+    "≈65.0000",
+    "≈77.0000",
+    "≈90.0000",
+  ]);
+  expect(
+    (await page.locator(".estimated .level-size").allTextContents()).every(
       (text) => text.includes("≈"),
     ),
   ).toBe(true);
   slow.ws.send(snapshot(slow.sub, 130, 2));
   await expect(page.locator(".mid-value")).toHaveText("80,002.00");
-  await expect(page.locator(".cached")).toHaveCount(0);
+  await expect(page.locator(".estimated")).toHaveCount(0);
   fast.ws.send(snapshot(fast.sub, 125, -20));
   await expect(page.locator(".mid-value")).toHaveText("80,002.00");
 });
 
-test("cached tails expire without new messages or layout changes", async ({
+test("estimated tails survive normal gaps then expire without new messages or layout changes", async ({
   page,
 }) => {
   await page.clock.install();
@@ -129,9 +144,11 @@ test("cached tails expire without new messages or layout changes", async ({
   const bounds = await page.locator(".workspace").boundingBox();
   const fast = connections.find((c) => c.sub.fast)!;
   fast.ws.send(snapshot(fast.sub, 110));
-  await expect(page.locator(".cached")).toHaveCount(14);
+  await expect(page.locator(".estimated")).toHaveCount(14);
   await page.clock.fastForward(2300);
-  await expect(page.locator(".cached")).toHaveCount(0);
+  await expect(page.locator(".estimated")).toHaveCount(14);
+  await page.clock.fastForward(8000);
+  await expect(page.locator(".estimated")).toHaveCount(0);
   await expect(page.locator("[data-price]")).toHaveCount(10);
   expect(await page.locator(".workspace").boundingBox()).toEqual(bounds);
 });
@@ -216,4 +233,104 @@ test("reduced motion disables level flashes", async ({ page }) => {
         rows.reduce((n, row) => n + row.getAnimations().length, 0),
       ),
   ).toBe(0);
+});
+
+test("hover summarizes the inclusive sweep on both sides without resizing the book", async ({
+  page,
+}) => {
+  await mockFeeds(page);
+  await page.goto("/");
+  await expect(page.locator(".feed-status.live")).toHaveCount(1);
+  const bounds = await page.locator(".workspace").boundingBox();
+  for (const [side, total, notional, average] of [
+    ["bid", "9.0000", "719,980.00", "79,997.78"],
+    ["ask", "12.0000", "960,026.00", "80,002.17"],
+  ]) {
+    await page.locator(`[data-side="${side}"][data-depth-index="2"]`).hover();
+    const tooltip = page.getByRole("tooltip");
+    await expect(tooltip).toBeVisible();
+    await expect(tooltip.locator('[data-summary="size"]')).toHaveText(total);
+    await expect(tooltip.locator('[data-summary="notional"]')).toHaveText(
+      notional,
+    );
+    await expect(tooltip.locator('[data-summary="average"]')).toContainText(
+      average,
+    );
+    await expect(page.locator(`.side-rows.${side} .in-sweep`)).toHaveCount(3);
+    expect(await page.locator(".workspace").boundingBox()).toEqual(bounds);
+  }
+  await page.locator("h1").hover();
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
+});
+
+test("hover remains at the chosen depth rank and updates estimates with new fast prices", async ({
+  page,
+}) => {
+  const connections = await mockFeeds(page);
+  await page.goto("/");
+  await expect(page.locator(".feed-status.live")).toHaveCount(1);
+  const fast = connections.find((c) => c.sub.fast)!;
+  fast.ws.send(snapshot(fast.sub, 110, 2));
+  const row = page.locator('[data-side="bid"][data-depth-index="7"]');
+  await row.hover();
+  const tooltip = page.getByRole("tooltip");
+  await expect(tooltip).toContainText("Includes estimated depth");
+  await expect(tooltip.locator('[data-summary="size"]')).toHaveText(
+    "≈ 44.0000",
+  );
+  const before = await tooltip.locator('[data-summary="notional"]').innerText();
+  fast.ws.send(snapshot(fast.sub, 120, 7));
+  await expect(tooltip.locator('[data-summary="notional"]')).not.toHaveText(
+    before,
+  );
+  await expect(page.locator(".selected-level")).toHaveAttribute(
+    "data-depth-index",
+    "7",
+  );
+  await page.getByLabel("Market", { exact: true }).selectOption("ETH");
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
+});
+
+test("keyboard focus and Escape support depth summaries", async ({ page }) => {
+  await mockFeeds(page);
+  await page.goto("/");
+  await expect(page.locator(".feed-status.live")).toHaveCount(1);
+  const row = page.locator('[data-side="ask"][data-depth-index="2"]');
+  await row.focus();
+  await expect(page.getByRole("tooltip")).toBeVisible();
+  await expect(row).toHaveAttribute("aria-describedby", "depth-summary");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
+  await page.setViewportSize({ width: 390, height: 650 });
+  await page.locator('[data-side="bid"][data-depth-index="11"]').focus();
+  await expect(page.getByRole("tooltip")).toBeVisible();
+  const rect = await page.getByRole("tooltip").boundingBox();
+  expect(rect!.y + rect!.height).toBeLessThanOrEqual(650);
+});
+
+test.use({ hasTouch: true });
+
+test("summary fits a narrow viewport and does not shift the table", async ({
+  page,
+}) => {
+  await mockFeeds(page);
+  await page.setViewportSize({ width: 320, height: 800 });
+  await page.goto("/");
+  await expect(page.locator(".feed-status.live")).toHaveCount(1);
+  const before = await page
+    .locator(".workspace")
+    .evaluate((el) => ({ width: el.clientWidth, height: el.clientHeight }));
+  await page.locator('[data-side="ask"][data-depth-index="6"]').tap();
+  const tooltip = page.getByRole("tooltip");
+  await expect(tooltip).toBeVisible();
+  const rect = await tooltip.boundingBox();
+  expect(rect!.x).toBeGreaterThanOrEqual(0);
+  expect(rect!.x + rect!.width).toBeLessThanOrEqual(320);
+  expect(rect!.y).toBeGreaterThanOrEqual(0);
+  expect(rect!.y + rect!.height).toBeLessThanOrEqual(800);
+  expect(
+    await page
+      .locator(".workspace")
+      .evaluate((el) => ({ width: el.clientWidth, height: el.clientHeight })),
+  ).toEqual(before);
 });

@@ -5,149 +5,162 @@ export type MergedLevel = Level & {
   time: number;
   receivedAt: number;
   confirmed: boolean;
-  total: number | null;
+  total: number;
+  notional: number;
   entered: boolean;
 };
 export type MergedBook = {
   coin: Coin;
   time: number;
   levels: [MergedLevel[], MergedLevel[]];
-  cached: boolean;
+  estimated: boolean;
 };
 type Snapshot = { book: Book; receivedAt: number };
-type ObservedLevel = Level & { time: number; receivedAt: number };
-
-export const CACHE_TTL = 2000;
-const MAX_FAST_HISTORY = 128;
+type ObservedLevel = Level & {
+  time: number;
+  receivedAt: number;
+  confirmed: boolean;
+};
+export const ESTIMATE_TTL = 10_000;
 
 function agrees(slow: Book, fast: Book) {
   return fast.levels.every((levels, side) => {
     const prefix = slow.levels[side].slice(0, 5);
     return (
       prefix.length === levels.length &&
-      levels.every((level, i) => {
-        const other = prefix[i];
-        return (
-          +level.px === +other.px &&
-          +level.sz === +other.sz &&
-          level.n === other.n
-        );
-      })
+      levels.every(
+        (level, i) =>
+          +level.px === +prefix[i].px &&
+          +level.sz === +prefix[i].sz &&
+          level.n === prefix[i].n,
+      )
     );
   });
 }
 
-/**
- * Snapshot reconciliation, not a delta reconstruction. Only the newest snapshot's
- * covered range is confirmed. Historical outer levels always retain provenance.
- */
+/** Exact latest snapshot inside; explicitly estimated distance-profile outside. */
 export class BookMerger {
   private slow: Snapshot | null = null;
-  private fast: Snapshot[] = [];
-  private lastTime = { fast: -1, slow: -1 };
-  private historyFloor = -1;
+  private fast: Snapshot | null = null;
   private previous: MergedBook | null = null;
-
   constructor(private coin: Coin) {}
 
   ingest(source: Source, book: Book, receivedAt: number): boolean {
-    if (book.coin !== this.coin || book.time <= this.lastTime[source])
+    if (book.coin !== this.coin || book.time <= (this[source]?.book.time ?? -1))
       return false;
-    if (source === "fast" && book.levels.some((side) => side.length > 5))
+    if (
+      source === "fast" &&
+      (book.levels.some((side) => side.length > 5) ||
+        book.time < (this.slow?.book.time ?? -1))
+    )
       return false;
-    this.lastTime[source] = book.time;
-    const snapshot = { book, receivedAt };
-    if (source === "slow") {
-      this.slow = snapshot;
-      // Keep the equal-time fast snapshot to validate agreement.
-      this.fast = this.fast.filter((item) => item.book.time >= book.time);
-    } else {
-      if (this.slow && book.time < this.slow.book.time) return false;
-      this.fast.push(snapshot);
-      if (this.fast.length > MAX_FAST_HISTORY) {
-        this.historyFloor = this.fast.shift()!.book.time;
-      }
-    }
+    this[source] = { book, receivedAt };
     return true;
   }
 
   read(now: number): MergedBook | null {
-    const newestFast = this.fast.at(-1);
-    if (!this.slow && !newestFast) return null;
-    // Never replay an incomplete history over an older baseline. A fresh full
-    // snapshot restores depth; until then the authoritative fast core is enough.
-    let baseline =
-      this.slow && this.slow.book.time >= this.historyFloor ? this.slow : null;
-    const equal =
-      baseline &&
-      this.fast.find((item) => item.book.time === baseline!.book.time);
-    if (baseline && equal && !agrees(baseline.book, equal.book))
-      baseline = null;
-    let time = baseline?.book.time ?? newestFast!.book.time;
+    const { slow, fast } = this;
+    if (!slow && !fast) return null;
+    const equal = slow && fast && slow.book.time === fast.book.time;
+    const useFull =
+      slow &&
+      (!fast ||
+        slow.book.time > fast.book.time ||
+        (equal && agrees(slow.book, fast.book)));
+    const latest = useFull ? slow! : fast!;
+    const time = latest.book.time;
     const observe = (snapshot: Snapshot, side: number): ObservedLevel[] =>
       snapshot.book.levels[side].map((level) => ({
         ...level,
         time: snapshot.book.time,
         receivedAt: snapshot.receivedAt,
+        confirmed: true,
       }));
-    let levels: [ObservedLevel[], ObservedLevel[]] = baseline
-      ? [observe(baseline, 0), observe(baseline, 1)]
-      : [[], []];
-    // With no trusted baseline, start from the latest fast snapshot alone.
-    const replay = baseline
-      ? this.fast.filter((item) => item.book.time > baseline!.book.time)
-      : newestFast
-        ? [newestFast]
-        : [];
-    for (const snapshot of replay) {
-      time = snapshot.book.time;
-      levels = levels.map((old, side) => {
-        const fresh = observe(snapshot, side);
-        // Fewer than five levels means the fast snapshot exhausted this side.
-        if (fresh.length < 5) return fresh;
-        const boundary = +fresh.at(-1)!.px;
-        // A snapshot replaces its entire covered range, including absent prices.
-        // Replaying EVERY update prevents a later boundary retreat resurrecting
-        // a level that an earlier fast snapshot already proved was absent.
-        const outer = old.filter((level) =>
-          side === 0 ? +level.px < boundary : +level.px > boundary,
-        );
-        return [...fresh, ...outer].slice(0, 20);
-      }) as [ObservedLevel[], ObservedLevel[]];
-    }
-    const result = levels.map((side, index) => {
-      let total = 0;
-      const oldPrices = new Set(
-        this.previous?.levels[index].map((level) => +level.px),
-      );
-      return side
-        .filter(
-          (level) =>
-            level.time === time ||
-            (time - level.time <= CACHE_TTL &&
-              now - level.receivedAt <= CACHE_TTL),
-        )
-        .map((level) => {
-          const confirmed = level.time === time;
-          total += confirmed ? +level.sz : 0;
-          return {
+    const canEstimate =
+      !useFull &&
+      slow &&
+      !equal &&
+      time - slow.book.time <= ESTIMATE_TTL &&
+      now - slow.receivedAt <= ESTIMATE_TTL;
+    const levels = [0, 1]
+      .map((side) => {
+        const fresh = observe(latest, side);
+        const profile = slow?.book.levels[side];
+        // A short fast side is exhausted: do not invent liquidity past its end.
+        if (!canEstimate || fresh.length < 5 || !profile || profile.length <= 5)
+          return fresh;
+        const direction = side === 0 ? -1 : 1;
+        const top = +fresh[0].px;
+        const oldTop = +profile[0].px;
+        const fastDistance = direction * (+fresh[4].px - top);
+        const oldDistance = direction * (+profile[4].px - oldTop);
+        // Preserve the slow profile's distances from its best price. If the fast
+        // core widens, move the entire estimated tail outward so it cannot overlap.
+        const outward = Math.max(0, fastDistance - oldDistance);
+        let previousPrice = +fresh[4].px;
+        for (const level of profile.slice(5, 20)) {
+          const distance = direction * (+level.px - oldTop);
+          // Round away floating-point arithmetic noise (BTC/ETH quote ticks <= 2dp).
+          const px = Number(
+            (top + direction * (distance + outward)).toFixed(8),
+          );
+          if (
+            !Number.isFinite(px) ||
+            px <= 0 ||
+            direction * (px - previousPrice) <= 0
+          )
+            continue;
+          fresh.push({
             ...level,
-            confirmed,
-            total: confirmed ? total : null,
-            entered:
-              confirmed && this.previous !== null && !oldPrices.has(+level.px),
-          };
-        });
-    }) as [MergedLevel[], MergedLevel[]];
+            px: String(px),
+            confirmed: false,
+            time: slow!.book.time,
+            receivedAt: slow!.receivedAt,
+          });
+          previousPrice = px;
+        }
+        return fresh;
+      })
+      .map((side, index) => {
+        let total = 0;
+        let notional = 0;
+        // Confirmation alone must not flash an already displayed price.
+        const oldPrices = new Set(
+          this.previous?.levels[index].map((level) => +level.px),
+        );
+        return side.map((level) => ({
+          ...level,
+          total: (total += +level.sz),
+          notional: (notional += +level.px * +level.sz),
+          entered:
+            level.confirmed &&
+            this.previous !== null &&
+            !oldPrices.has(+level.px),
+        }));
+      }) as [MergedLevel[], MergedLevel[]];
     return {
       coin: this.coin,
       time,
-      levels: result,
-      cached: result.some((side) => side.some((level) => !level.confirmed)),
+      levels,
+      estimated: levels.some((side) => side.some((level) => !level.confirmed)),
     };
   }
 
   published(book: MergedBook) {
     this.previous = book;
   }
+}
+
+/** Inclusive sweep from the best quote through a selected depth rank. */
+export function summarizeDepth(levels: MergedLevel[], index: number) {
+  const level = levels[index];
+  if (!level || index < 0) return null;
+  return {
+    levels: index + 1,
+    price: +level.px,
+    size: level.total,
+    notional: level.notional,
+    average: level.notional / level.total,
+    estimated: levels.slice(0, index + 1).some((row) => !row.confirmed),
+  };
 }

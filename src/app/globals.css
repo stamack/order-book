@@ -342,22 +342,6 @@ h2 svg {
 .level-total {
   color: #879fa8;
 }
-.cached .level-price {
-  opacity: 0.58;
-}
-.cached .level-size {
-  color: #718992;
-}
-.cached .level-total {
-  color: #50656e;
-}
-.cached-mark {
-  display: inline-block;
-  width: 12px;
-  font-size: 10px;
-  color: #ad9f7b;
-  text-align: left;
-}
 .empty-row {
   color: #334851;
 }
@@ -633,7 +617,7 @@ h2 svg {
   .mid-value {
     font-size: 21px;
   }
-  .cached-mark {
+  .estimate-mark {
     width: 10px;
   }
   .book-legend {
@@ -650,4 +634,118 @@ h2 svg {
     transition: none !important;
     animation: none !important;
   }
+}
+/* Cumulative sweep selection never participates in layout. */
+.book-row {
+  cursor: crosshair;
+}
+.book-row.in-sweep {
+  background-color: #77bca90c;
+}
+.book-row.ask.in-sweep {
+  background-color: #d28a9a0d;
+}
+.book-row.selected-level {
+  outline: 1px solid #77bca955;
+  outline-offset: -1px;
+}
+.book-row.ask.selected-level {
+  outline-color: #d28a9a66;
+}
+.book-row:focus-visible {
+  outline: 1px solid var(--bid);
+  outline-offset: -1px;
+}
+.book-row.ask:focus-visible {
+  outline-color: var(--ask);
+}
+.estimated .level-price {
+  opacity: 0.82;
+}
+.estimated .level-size,
+.estimated .level-total {
+  color: #8fa0a7;
+}
+.estimated .depth-bar {
+  opacity: 0.5;
+  background-image: repeating-linear-gradient(
+    125deg,
+    transparent 0 4px,
+    #aabdb408 4px 5px
+  );
+}
+.estimate-mark {
+  display: inline-block;
+  width: 12px;
+  font-size: 9px;
+  color: #b2a383;
+  text-align: left;
+}
+.depth-summary {
+  position: fixed;
+  z-index: 50;
+  width: min(268px, calc(100vw - 24px));
+  height: 225px;
+  border: 1px solid #3c5356;
+  border-radius: 8px;
+  background: #18262c;
+  box-shadow: 0 12px 40px #0007;
+  padding: 16px;
+  pointer-events: none;
+}
+.summary-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.summary-heading strong {
+  color: var(--bid);
+  font-size: 11px;
+  font-weight: 550;
+}
+.depth-summary.ask .summary-heading strong {
+  color: var(--ask);
+}
+.summary-heading > span {
+  font-size: 9px;
+  color: var(--muted);
+}
+.summary-kind {
+  color: #91b8aa;
+  font-size: 9px;
+  margin-top: 7px;
+}
+.summary-kind.approximate {
+  color: #d4ba86;
+}
+.depth-summary dl {
+  margin: 14px 0 12px;
+}
+.depth-summary dl > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 26px;
+  gap: 8px;
+}
+.depth-summary dt {
+  color: #9eb1b9;
+  font-size: 10px;
+}
+.depth-summary dd {
+  margin: 0;
+  color: #e0ebed;
+  font: 10px var(--mono);
+  white-space: nowrap;
+}
+.depth-summary dd small {
+  font-size: 7px;
+  color: #8ba1aa;
+}
+.summary-note {
+  border-top: 1px solid #34464e;
+  padding-top: 10px;
+  color: #8da5af;
+  font-size: 8px;
 }

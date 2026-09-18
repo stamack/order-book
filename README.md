@@ -19,16 +19,21 @@ Open http://localhost:3000. No keys, backend, or environment variables are neede
 
 Hyperliquid provides complete snapshots: `fast: true` has up to five levels per side; `fast: false` has up to twenty. Both use the chosen symbol and `nSigFigs`. Separate sockets identify the feed because the response doesn't include those subscription parameters.
 
-These feeds **cannot reconstruct an exact, current twenty-level book between full snapshots**. The app explicitly distinguishes confirmed liquidity from historical outer levels:
+These feeds **cannot reconstruct an exact, current twenty-level book between full snapshots**. The widget keeps an exact inside market and uses an explicitly labeled model for the outer depth:
 
-1. Order data by the exchange timestamp, not arrival time. Newer full snapshots replace older fast data. Old packets cannot roll the best prices backward.
-2. Each fast snapshot replaces its entire covered price range, including deletion of prices absent from that range. An exhausted side (fewer than five levels) clears all older depth on that side.
-3. When a delayed full snapshot arrives, replay every retained fast snapshot newer than it. Applying only the latest fast snapshot could resurrect levels that an intermediate update removed.
-4. Equal-time snapshots can share full depth only if their first five levels agree on price, size, and order count. Conflicts fall back to the fast core.
-5. Older outer levels are dimmed and marked **≈ last confirmed**. Their sizes may have changed. They expire within two seconds of receipt, or when exchange-time distance exceeds two seconds. Their cumulative totals and depth bars are withheld. They are never silently treated as current orders.
-6. Replay history is capped at 128 snapshots. If a baseline predates retained history, fall back to the fast core until trustworthy full depth arrives.
+1. Order data by exchange timestamp. The newest full snapshot supplies confirmed depth; a newer fast snapshot replaces the inside five levels unchanged. Old messages cannot roll the best prices backward. Equal-time snapshots share full depth only when their first five levels agree.
+2. Preserve the slow snapshot’s shape by **distance from its best price**, carrying sizes at the corresponding depth rank. Translate that price-distance profile around the newest fast best price on each side.
+3. If the fast five-level range has widened, shift the projected tail farther outward so it cannot overlap the real five levels. Preserve the gaps within the slow profile. Prices remain positive, sorted, unique, and outside the confirmed spread.
+4. Projected prices, sizes, and cumulative totals are marked **≈**, with subdued striped depth bars. These are estimates, not exchange orders. The model assumes outer sizes and price spacing remain similar until the next full snapshot; it does not extrapolate a volume multiplier from the fast feed.
+5. A newer full snapshot replaces projections with actual levels. An exhausted fast side (fewer than five levels) never receives a fabricated tail. A missing or more-than-ten-second-old slow profile cannot support projections, so unused slots remain placeholders in those cases.
 
-Only confirmed rows enter cumulative totals, depth-bar scaling, midpoint, spread, or the top-five balance. Both book sides use one shared bar scale. Twelve levels per side are displayed; placeholders reserve unused rows. The midpoint is explicitly labeled and is not a last-trade price.
+For example, if the slow sixth bid is $5 below its best bid, an unchanged-width fast core moving up $3 moves the projected sixth bid up $3 too. Its size comes from the slow sixth level. It remains outside the fifth fast bid and is labeled estimated until confirmed.
+
+Midpoint, spread, and top-five balance use only confirmed data. Cumulative totals and bars can include projections and are marked accordingly. Both sides share one bar scale. Twelve levels per side are displayed, with fixed placeholders for unavailable rows.
+
+## Hover summaries
+
+Hover or focus a level to highlight the inclusive range from the best quote through that depth rank. The floating panel shows distance from midpoint, size-weighted average price, cumulative BTC/ETH size, and cumulative USD value. Any range containing projections is labeled estimated, including its totals. Numbers update while the pointer stays still. Touch can pin the summary; Escape or tapping elsewhere dismisses it. The panel is positioned outside layout and kept within the viewport.
 
 The merge engine is in `src/lib/merge-book.ts`; transport and coalesced publication are in `src/lib/use-book.ts`.
 
@@ -37,8 +42,8 @@ The merge engine is in `src/lib/merge-book.ts`; transport and coalesced publicat
 - BTC / ETH selector; significant-figure options 2–5 and full precision.
 - One vertical table, with asks descending toward the spread and bids descending away from it, following the layouts of Hyperliquid and Binance.
 - Fixed panel, row, and column geometry at desktop and mobile sizes. Precision changes, sparse books, and reconnections do not resize the widget.
-- Price-keyed rows preserve DOM identity. New confirmed levels flash; size changes and midpoint movement receive restrained color feedback. Reduced-motion preferences disable animation.
-- Every message updates the reconciler, but React publishes at most once per animation frame. No intermediate fast snapshot is lost before reconciliation. Memoized rows receive primitive props.
+- Confirmed rows are keyed by price; projected rows are keyed by depth rank. New confirmed levels flash; size changes and midpoint movement receive restrained color feedback. Reduced-motion preferences disable animation.
+- Every message updates the snapshot model, but React publishes at most once per animation frame. Memoized rows receive primitive props.
 - Heartbeats, stale indicators, capped exponential reconnection backoff, and independent socket recovery. Switching symbol/precision disposes both subscriptions and atomically clears the old book.
 
 ## Verify
@@ -52,7 +57,7 @@ npm run test:e2e
 npm run build
 ```
 
-Unit tests cover validation, timestamp ordering, delayed snapshots, deletion replay, conflicting equal-time snapshots, thin books, cache expiry, bounded history, and rapid reversals. Browser tests verify the single vertical book, historical-row labeling, cumulative-total withholding, layout stability, symbol/precision switches, flashes, stale recovery, and reduced motion.
+Unit tests cover validation, timestamp ordering, distance-profile projection, spread widening, equal-time conflicts, thin books, expiry, rapid reversals, and weighted hover calculations. Browser tests verify estimate labels and totals, hover selection, live summary updates, keyboard/touch interaction, viewport positioning, layout stability, symbol/precision switches, flashes, stale recovery, and reduced motion.
 
 ## Deploy
 

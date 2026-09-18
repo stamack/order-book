@@ -24,7 +24,7 @@ export function useOrderBook(coin: Coin, precision: Precision): FeedState {
     let frame = 0;
     let newestTime = -1;
     let currentReceivedAt = Date.now();
-    let lastCacheCount = 0;
+    let lastEstimateCount = 0;
     let currentStale = false;
     const connections: Record<Source, Connection> = {
       fast: "connecting",
@@ -58,7 +58,7 @@ export function useOrderBook(coin: Coin, precision: Precision): FeedState {
             : healthy
               ? "live"
               : "degraded";
-        lastCacheCount =
+        lastEstimateCount =
           book?.levels.flat().filter((level) => !level.confirmed).length ?? 0;
         setState({ book, status, connections: { ...connections } });
         if (book) merger.published(book);
@@ -148,15 +148,15 @@ export function useOrderBook(coin: Coin, precision: Precision): FeedState {
         )
           socket.close();
       }
-      // Expire historical tails even when both feeds go quiet.
-      const cached = lastCacheCount
+      // Expire estimated tails even when both feeds go quiet.
+      const estimated = lastEstimateCount
         ? (merger
             .read(now)
             ?.levels.flat()
             .filter((level) => !level.confirmed).length ?? 0)
         : 0;
       const stale = newestTime >= 0 && now - currentReceivedAt > 10_000;
-      if (changed || stale !== currentStale || cached !== lastCacheCount)
+      if (changed || stale !== currentStale || estimated !== lastEstimateCount)
         publish();
       currentStale = stale;
     }, 250);

@@ -5,12 +5,16 @@ import {
   displaySize,
   metrics,
   price,
-  size,
   type Coin,
   type Precision,
 } from "@/lib/book";
 import { type MergedLevel } from "@/lib/merge-book";
 import { useOrderBook, type FeedState } from "@/lib/use-book";
+import {
+  DepthSummary,
+  useDepthHover,
+  type DepthSelection,
+} from "./depth-summary";
 
 const VISIBLE_LEVELS = 12;
 const DOCS =
@@ -164,21 +168,23 @@ function Status({ feed }: { feed: FeedState }) {
 const Row = memo(function Row({
   px,
   sz,
-  n,
+  index,
+  highlighted,
+  selected,
   total,
   confirmed,
   entered,
-  time,
   width,
   side,
 }: {
   px: string;
   sz: string;
-  n: number;
-  total: number | null;
+  index: number;
+  highlighted: boolean;
+  selected: boolean;
+  total: number;
   confirmed: boolean;
   entered: boolean;
-  time: number;
   width: number;
   side: "bid" | "ask";
 }) {
@@ -220,10 +226,14 @@ const Row = memo(function Row({
     <div
       ref={ref}
       role="row"
-      className={`book-row ${side} ${confirmed ? "confirmed" : "cached"}`}
+      className={`book-row ${side} ${confirmed ? "confirmed" : "estimated"} ${highlighted ? "in-sweep" : ""} ${selected ? "selected-level" : ""}`}
       data-price={px}
       data-confirmed={confirmed}
-      title={`${confirmed ? "Confirmed" : "Last confirmed; may have changed"} at ${new Date(time).toISOString().slice(11, 23)} UTC · ${n} orders · size ${size(+sz)}${total === null ? " · cumulative total unavailable" : ` · cumulative ${size(total)}`}`}
+      data-depth-index={index}
+      data-side={side}
+      tabIndex={0}
+      aria-label={`${side === "ask" ? "Ask" : "Bid"} level ${index + 1}${confirmed ? "" : ", estimated"}: ${price(+px)} USD`}
+      aria-describedby={selected ? "depth-summary" : undefined}
     >
       <span
         className="depth-bar"
@@ -231,16 +241,22 @@ const Row = memo(function Row({
         aria-hidden="true"
       />
       <span role="cell" className="level-price">
+        <span className="estimate-mark" aria-hidden="true">
+          {confirmed ? "" : "≈"}
+        </span>
         {price(+px)}
       </span>
       <span role="cell" className="level-size">
-        <span className="cached-mark" aria-label="last confirmed">
+        <span className="estimate-mark" aria-hidden="true">
           {confirmed ? "" : "≈"}
         </span>
         {displaySize(+sz)}
       </span>
       <span role="cell" className="level-total">
-        {total === null ? "—" : displaySize(total)}
+        <span className="estimate-mark" aria-hidden="true">
+          {confirmed ? "" : "≈"}
+        </span>
+        {displaySize(total)}
       </span>
     </div>
   );
@@ -250,7 +266,9 @@ function Side({
   levels,
   side,
   scale,
+  selection,
 }: {
+  selection: DepthSelection | null;
   levels: MergedLevel[];
   side: "bid" | "ask";
   scale: number;
@@ -273,19 +291,26 @@ function Side({
       {rows.map((level, i) =>
         level ? (
           <Row
-            key={+level.px}
+            key={
+              level.confirmed
+                ? +level.px
+                : `estimate-${side === "ask" ? VISIBLE_LEVELS - 1 - i : i}`
+            }
             px={level.px}
             sz={level.sz}
-            n={level.n}
-            time={level.time}
+            index={side === "ask" ? VISIBLE_LEVELS - 1 - i : i}
+            highlighted={
+              selection?.side === side &&
+              (side === "ask" ? VISIBLE_LEVELS - 1 - i : i) <= selection.index
+            }
+            selected={
+              selection?.side === side &&
+              (side === "ask" ? VISIBLE_LEVELS - 1 - i : i) === selection.index
+            }
             total={level.total}
             confirmed={level.confirmed}
             entered={level.entered}
-            width={
-              level.total === null || !scale
-                ? 0
-                : Math.min(1, level.total / scale)
-            }
+            width={!scale ? 0 : Math.min(1, level.total / scale)}
             side={side}
           />
         ) : (
@@ -329,14 +354,18 @@ function MidPrice({ value }: { value: number | undefined }) {
 
 function OrderBook({ coin, precision }: { coin: Coin; precision: Precision }) {
   const feed = useOrderBook(coin, precision);
+  const { selection, select, clear } = useDepthHover();
   const values = metrics(feed.book);
   const [bids, asks] = feed.book?.levels ?? [[], []];
+  const selectedLevels = selection?.side === "ask" ? asks : bids;
+  const activeSelection =
+    selection && selectedLevels[selection.index] ? selection : null;
   const visible = [
     ...bids.slice(0, VISIBLE_LEVELS),
     ...asks.slice(0, VISIBLE_LEVELS),
   ];
-  const scale = Math.max(0, ...visible.map((level) => level.total ?? 0));
-  // Only the latest snapshot's top five contribute. Cached tails are never summed.
+  const scale = Math.max(0, ...visible.map((level) => level.total));
+  // Only the latest snapshot's top five contribute. Estimated tails do not affect this balance.
   const bidSize = bids
     .slice(0, 5)
     .filter((level) => level.confirmed)
@@ -358,6 +387,23 @@ function OrderBook({ coin, precision }: { coin: Coin; precision: Precision }) {
         role="table"
         aria-label={`${coin} order book`}
         aria-colcount={3}
+        onPointerMove={(event) => {
+          if (event.pointerType !== "touch") select(event.target, "pointer");
+        }}
+        onPointerLeave={() => {
+          if (selection?.mode === "pointer") clear();
+        }}
+        onFocus={(event) => select(event.target, "focus")}
+        onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget)) clear();
+        }}
+        onClick={(event) => select(event.target, "touch")}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            clear();
+            event.stopPropagation();
+          }
+        }}
       >
         <div className="column-head" role="row">
           <span role="columnheader">
@@ -376,7 +422,12 @@ function OrderBook({ coin, precision }: { coin: Coin; precision: Precision }) {
           </span>
           <span>Sell orders</span>
         </div>
-        <Side levels={asks} side="ask" scale={scale} />
+        <Side
+          levels={asks}
+          side="ask"
+          scale={scale}
+          selection={activeSelection}
+        />
         <div className="spread" role="row">
           <div role="cell" className="mid-price">
             <MidPrice value={values?.mid} />
@@ -402,8 +453,22 @@ function OrderBook({ coin, precision }: { coin: Coin; precision: Precision }) {
           </span>
           <span>Buy orders</span>
         </div>
-        <Side levels={bids} side="bid" scale={scale} />
+        <Side
+          levels={bids}
+          side="bid"
+          scale={scale}
+          selection={activeSelection}
+        />
       </div>
+      {activeSelection && (
+        <DepthSummary
+          selection={activeSelection}
+          levels={selectedLevels}
+          coin={coin}
+          mid={values?.mid}
+          stale={feed.status === "stale"}
+        />
+      )}
       <div className="imbalance">
         <div className="imbalance-labels">
           <span className="bid-text">
@@ -426,8 +491,8 @@ function OrderBook({ coin, precision }: { coin: Coin; precision: Precision }) {
           <i className="flash-key" />
           New level
         </span>
-        <span title="Older outer levels are marked ≈ for up to two seconds. They may have changed. Their cumulative totals are withheld.">
-          ≈ Last confirmed · ≤2s
+        <span title="Outer prices follow the last full snapshot’s distance from the best price, using its sizes. Approximate prices and totals are marked ≈. Projections stop when full depth is more than ten seconds old.">
+          ≈ Estimated outer depth
         </span>
       </div>
       <div className="feed-footer">
